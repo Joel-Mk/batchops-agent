@@ -1,0 +1,5 @@
+pyyaml
+duckdb
+pandas
+scikit-learn
+numpy
