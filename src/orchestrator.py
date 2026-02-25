@@ -4,6 +4,7 @@ from datetime import datetime
 
 from src.ingestion import run_ingestion
 from src.validation import run_validation
+from src.import_layer import run_import
 
 
 STAGES = [
@@ -76,7 +77,8 @@ def run_pipeline(provider, pipeline, snapshot_date):
             print("Validation passed.")
 
         elif stage == "import":
-            print("Import completed (placeholder).")
+            db_path = run_import(data, run_path)
+            print(f"Import completed. Database path: {db_path}")
 
         elif stage == "feature_etl":
             print("Feature ETL completed (placeholder).")
