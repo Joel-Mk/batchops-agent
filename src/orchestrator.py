@@ -159,8 +159,12 @@ def resume_pipeline(run_id):
         print("Run ID not found.")
         return
 
+    # ---- Load state and plan ----
     with open(os.path.join(run_path, "state.json")) as f:
         state = json.load(f)
+
+    with open(os.path.join(run_path, "plan.json")) as f:
+        plan = json.load(f)
 
     last_stage = state["current_stage"]
 
@@ -170,7 +174,72 @@ def resume_pipeline(run_id):
 
     start_index = STAGES.index(last_stage) + 1
 
-    print(f"Resuming from stage after: {last_stage}")
+    print(f"Resuming run {run_id} from stage after: {last_stage}")
 
+    provider = plan["provider"]
+    pipeline = plan["pipeline"]
+    snapshot_date = plan["snapshot_date"]
+
+    # ---- Dependency-aware ingestion rebuild ----
+    # Re-run ingestion only if failure happened before or at import
+    if last_stage in ["ingestion", "validation", "import"]:
+        print("Rebuilding ingestion data...")
+        data = run_ingestion(provider)
+    else:
+        data = None
+
+    train_output = None
+
+    # ---- Resume remaining stages ----
     for stage in STAGES[start_index:]:
-        print(f"Running stage: {stage}")
+
+        print(f"\nRunning stage: {stage}")
+        append_log(run_path, stage, "started")
+
+        state["current_stage"] = stage
+        write_json(os.path.join(run_path, "state.json"), state)
+
+        if stage == "validation":
+            validation_status = run_validation(data, run_path)
+
+            if validation_status == "FAIL":
+                append_log(run_path, stage, "failed")
+                state["status"] = "failed"
+                write_json(os.path.join(run_path, "state.json"), state)
+                return
+
+            append_log(run_path, stage, "completed")
+
+        elif stage == "import":
+            run_import(data, run_path)
+            append_log(run_path, stage, "completed")
+
+        elif stage == "feature_etl":
+            run_feature_etl(run_path, snapshot_date)
+            append_log(run_path, stage, "completed")
+
+        elif stage == "train":
+            train_output = run_train(run_path)
+            append_log(run_path, stage, "completed")
+
+        elif stage == "inference":
+
+            # If resume started at inference directly,
+            # reload model + test data safely
+            if train_output is None:
+                print("Reloading model for inference...")
+                train_output = run_train(run_path)
+
+            run_inference(
+                model=train_output["model"],
+                X_test=train_output["X_test"],
+                customer_ids=train_output["customer_ids_test"],
+                run_path=run_path
+            )
+
+            append_log(run_path, stage, "completed")
+
+    state["status"] = "completed"
+    write_json(os.path.join(run_path, "state.json"), state)
+
+    print(f"\nRun {run_id} resumed and completed successfully.")
