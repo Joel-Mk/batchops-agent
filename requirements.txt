@@ -3,3 +3,4 @@ duckdb
 pandas
 scikit-learn
 numpy
+joblib

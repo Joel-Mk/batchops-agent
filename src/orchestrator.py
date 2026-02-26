@@ -5,6 +5,9 @@ from datetime import datetime
 from src.ingestion import run_ingestion
 from src.validation import run_validation
 from src.import_layer import run_import
+from src.feature_engineering import run_feature_etl
+from src.train import run_train
+from src.inference import run_inference
 
 
 STAGES = [
@@ -29,11 +32,24 @@ def write_json(path, data):
         json.dump(data, f, indent=2)
 
 
+def append_log(run_path, stage, status, message=""):
+    log_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "stage": stage,
+        "status": status,
+        "message": message
+    }
+
+    log_path = os.path.join(run_path, "logs.jsonl")
+    with open(log_path, "a") as f:
+        f.write(json.dumps(log_entry) + "\n")
+
+
 def run_pipeline(provider, pipeline, snapshot_date):
 
     run_id, run_path = create_run_folder()
 
-    # Create execution plan
+    # ---- Execution Plan ----
     plan = {
         "provider": provider,
         "pipeline": pipeline,
@@ -50,50 +66,87 @@ def run_pipeline(provider, pipeline, snapshot_date):
 
     write_json(os.path.join(run_path, "state.json"), state)
 
-    data = None  # will hold ingestion output
+    data = None
+    train_output = None
 
+    # ---- Stage Loop ----
     for stage in STAGES:
 
         print(f"\nRunning stage: {stage}")
+        append_log(run_path, stage, "started")
 
         state["current_stage"] = stage
         write_json(os.path.join(run_path, "state.json"), state)
 
-        # ---- Stage Execution ----
-
         if stage == "ingestion":
             data = run_ingestion(provider)
             print("Ingestion completed.")
+            append_log(run_path, stage, "completed")
 
         elif stage == "validation":
             validation_status = run_validation(data, run_path)
 
             if validation_status == "FAIL":
                 print("Validation failed. Stopping pipeline.")
+                append_log(run_path, stage, "failed")
+
                 state["status"] = "failed"
                 write_json(os.path.join(run_path, "state.json"), state)
                 return
 
             print("Validation passed.")
+            append_log(run_path, stage, "completed")
 
         elif stage == "import":
-            db_path = run_import(data, run_path)
-            print(f"Import completed. Database path: {db_path}")
+            run_import(data, run_path)
+            print("Import completed.")
+            append_log(run_path, stage, "completed")
 
         elif stage == "feature_etl":
-            print("Feature ETL completed (placeholder).")
+            run_feature_etl(run_path, snapshot_date)
+            print("Feature ETL completed.")
+            append_log(run_path, stage, "completed")
 
         elif stage == "train":
-            print("Training completed (placeholder).")
+            train_output = run_train(run_path)
+            print("Training completed.")
+            append_log(run_path, stage, "completed")
 
         elif stage == "inference":
-            print("Inference completed (placeholder).")
+            run_inference(
+                model=train_output["model"],
+                X_test=train_output["X_test"],
+                customer_ids=train_output["customer_ids_test"],
+                run_path=run_path
+            )
+            print("Inference completed.")
+            append_log(run_path, stage, "completed")
 
         else:
             raise ValueError(f"Unknown stage: {stage}")
 
+    # ---- Mark Completed ----
     state["status"] = "completed"
     write_json(os.path.join(run_path, "state.json"), state)
+
+    # ---- Generate Run Summary ----
+    summary_path = os.path.join(run_path, "run_summary.md")
+
+    with open(summary_path, "w") as f:
+        f.write("# Run Summary\n\n")
+        f.write(f"**Provider:** {provider}\n\n")
+        f.write(f"**Pipeline:** {pipeline}\n\n")
+        f.write(f"**Snapshot Date:** {snapshot_date}\n\n")
+        f.write(f"**Status:** completed\n\n")
+
+        metrics_path = os.path.join(run_path, "metrics.json")
+        if os.path.exists(metrics_path):
+            with open(metrics_path) as mf:
+                metrics_data = json.load(mf)
+
+            f.write("## Metrics\n")
+            for k, v in metrics_data.items():
+                f.write(f"- {k}: {v}\n")
 
     print(f"\nRun {run_id} completed successfully.")
 
