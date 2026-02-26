@@ -1,0 +1,10 @@
+{
+  "checks": {
+    "customers_required_columns": "PASS",
+    "transactions_required_columns": "PASS",
+    "duplicate_customers": 0,
+    "missing_email_rate": 0.166,
+    "missing_email_status": "PASS"
+  },
+  "status": "PASS"
+}

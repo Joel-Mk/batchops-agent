@@ -1,0 +1,13 @@
+{
+  "provider": "provider_a",
+  "pipeline": "propensity_model",
+  "snapshot_date": "2026-02-01",
+  "stages": [
+    "ingestion",
+    "validation",
+    "import",
+    "feature_etl",
+    "train",
+    "inference"
+  ]
+}
